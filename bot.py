@@ -34,8 +34,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Aku adalah SmartReport Bot untuk mencatat keuangan.\n\n"
         "📝 **Cara Penggunaan:**\n"
         "/tambah [jenis] [nominal] [kategori] [keterangan]\n"
+        "/summary - Ringkasan semua waktu\n"
+        "/hari - Ringkasan hari ini\n"
+        "/minggu - Ringkasan minggu ini\n"
+        "/bulan - Ringkasan bulan ini\n"
         "/laporan [kategori] [periode]\n"
-        "/summary - Lihat total pemasukan & pengeluaran\n"
         "/help - Tampilkan bantuan\n\n"
         "💡 **Contoh:**\n"
         "/tambah pemasukan 5000000 Gaji Gaji bulanan\n"
@@ -49,15 +52,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📚 **Daftar Perintah:**\n\n"
         "/start - Mulai bot\n"
         "/tambah [jenis] [nominal] [kategori] [keterangan]\n"
+        "/summary - Ringkasan semua waktu\n"
+        "/hari - Ringkasan hari ini\n"
+        "/minggu - Ringkasan minggu ini\n"
+        "/bulan - Ringkasan bulan ini\n"
         "/laporan [kategori] [periode]\n"
-        "/summary - Ringkasan keuangan\n"
         "/help - Tampilkan bantuan\n\n"
         "📝 **Contoh:**\n"
         "/tambah pemasukan 5000000 Gaji Gaji bulanan\n"
         "/tambah pengeluaran 25000 Makan Makan siang\n"
         "/laporan Makan minggu ini\n"
-        "/laporan keuangan bulan ini\n"
-        "/summary"
+        "/laporan keuangan bulan ini"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -121,6 +126,80 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error in summary_command: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+async def hari_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        transactions = sheet_manager.get_transactions(limit=1000)
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        filtered = [t for t in transactions if t['Tanggal'] == today]
+        
+        total_masuk = sum(float(t['Pemasukan']) for t in filtered)
+        total_keluar = sum(float(t['Pengeluaran']) for t in filtered)
+        saldo = total_masuk - total_keluar
+        
+        response = (
+            f"📊 **Ringkasan Hari Ini** ({today}):\n\n"
+            f"💰 Pemasukan: Rp{total_masuk:,.0f}\n"
+            f"💸 Pengeluaran: Rp{total_keluar:,.0f}\n"
+            f"📈 Saldo: Rp{saldo:,.0f}"
+        )
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in hari_command: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+async def minggu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        transactions = sheet_manager.get_transactions(limit=1000)
+        now = datetime.now()
+        start_of_week = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+        
+        filtered = [t for t in transactions if t['Tanggal'] >= start_of_week]
+        
+        total_masuk = sum(float(t['Pemasukan']) for t in filtered)
+        total_keluar = sum(float(t['Pengeluaran']) for t in filtered)
+        saldo = total_masuk - total_keluar
+        
+        response = (
+            f"📊 **Ringkasan Minggu Ini** ({start_of_week} s.d {now.strftime('%Y-%m-%d')}):\n\n"
+            f"💰 Pemasukan: Rp{total_masuk:,.0f}\n"
+            f"💸 Pengeluaran: Rp{total_keluar:,.0f}\n"
+            f"📈 Saldo: Rp{saldo:,.0f}"
+        )
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in minggu_command: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+async def bulan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        transactions = sheet_manager.get_transactions(limit=1000)
+        now = datetime.now()
+        start_of_month = now.strftime("%Y-%m-01")
+        
+        filtered = [t for t in transactions if t['Tanggal'] >= start_of_month]
+        
+        total_masuk = sum(float(t['Pemasukan']) for t in filtered)
+        total_keluar = sum(float(t['Pengeluaran']) for t in filtered)
+        saldo = total_masuk - total_keluar
+        
+        response = (
+            f"📊 **Ringkasan Bulan Ini** ({now.strftime('%B %Y')}):\n\n"
+            f"💰 Pemasukan: Rp{total_masuk:,.0f}\n"
+            f"💸 Pengeluaran: Rp{total_keluar:,.0f}\n"
+            f"📈 Saldo: Rp{saldo:,.0f}"
+        )
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in bulan_command: {str(e)}")
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 async def laporan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211,6 +290,9 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("tambah", tambah_command))
     application.add_handler(CommandHandler("summary", summary_command))
+    application.add_handler(CommandHandler("hari", hari_command))
+    application.add_handler(CommandHandler("minggu", minggu_command))
+    application.add_handler(CommandHandler("bulan", bulan_command))
     application.add_handler(CommandHandler("laporan", laporan_command))
     
     logger.info("🚀 Bot is starting...")
