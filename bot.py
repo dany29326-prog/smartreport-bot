@@ -4,6 +4,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 from sheets import GoogleSheetsManager
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -30,15 +31,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     welcome_message = (
         f"Halo {user.first_name}! 👋\n\n"
-        "Aku adalah SmartReport Bot untuk mencatat pengeluaran.\n\n"
+        "Aku adalah SmartReport Bot untuk mencatat keuangan.\n\n"
         "📝 **Cara Penggunaan:**\n"
-        "/tambah [jumlah] [nama] [kategori] [keterangan]\n"
-        "/lihat - Lihat 10 pengeluaran terakhir\n"
-        "/total - Lihat total pengeluaran\n"
+        "/tambah [jenis] [nominal] [kategori] [keterangan]\n"
+        "/laporan [kategori] [periode]\n"
+        "/summary - Lihat total pemasukan & pengeluaran\n"
         "/help - Tampilkan bantuan\n\n"
         "💡 **Contoh:**\n"
-        "/tambah 25000 Andi Makan Makan siang\n"
-        "/tambah 15000 Budi Transport Bensin motor"
+        "/tambah pemasukan 5000000 Gaji Gaji bulanan\n"
+        "/tambah pengeluaran 25000 Makan Makan siang\n"
+        "/laporan Makan minggu ini"
     )
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
 
@@ -46,15 +48,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "📚 **Daftar Perintah:**\n\n"
         "/start - Mulai bot\n"
-        "/tambah [jumlah] [nama] [kategori] [keterangan]\n"
-        "/lihat - Lihat 10 pengeluaran terakhir\n"
-        "/total - Lihat total pengeluaran\n"
+        "/tambah [jenis] [nominal] [kategori] [keterangan]\n"
+        "/laporan [kategori] [periode]\n"
+        "/summary - Ringkasan keuangan\n"
         "/help - Tampilkan bantuan\n\n"
-        "📝 **Format /tambah:**\n"
-        "/tambah [jumlah] [nama] [kategori] [keterangan]\n\n"
-        "💡 **Contoh:**\n"
-        "/tambah 25000 Andi Makan Makan siang\n"
-        "/tambah 15000 Budi Transport Bensin motor"
+        "📝 **Contoh:**\n"
+        "/tambah pemasukan 5000000 Gaji Gaji bulanan\n"
+        "/tambah pengeluaran 25000 Makan Makan siang\n"
+        "/laporan Makan minggu ini\n"
+        "/laporan keuangan bulan ini\n"
+        "/summary"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -64,94 +67,137 @@ async def tambah_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(args) < 4:
             await update.message.reply_text(
-                "❌ Format salah!\n"
-                "/tambah [jumlah] [nama] [kategori] [keterangan]\n\n"
-                "💡 Contoh: /tambah 25000 Andi Makan Makan siang"
+                "❌ Format:\n/tambah [jenis] [nominal] [kategori] [keterangan]\n\n"
+                "Contoh:\n/tambah pemasukan 5000000 Gaji Gaji bulanan\n"
+                "/tambah pengeluaran 25000 Makan Makan siang"
             )
+            return
+        
+        trans_type = args[0].lower()
+        if trans_type not in ['pemasukan', 'pengeluaran']:
+            await update.message.reply_text("❌ Jenis harus 'pemasukan' atau 'pengeluaran'")
             return
         
         try:
-            amount = float(args[0].replace('.', '').replace(',', ''))
+            amount = float(args[1].replace('.', '').replace(',', ''))
             if amount <= 0:
-                raise ValueError("Amount must be positive")
-        except ValueError:
-            await update.message.reply_text("❌ Jumlah tidak valid. Masukkan angka positif.")
+                raise ValueError
+        except:
+            await update.message.reply_text("❌ Nominal harus angka positif")
             return
         
-        name = args[1]
         category = args[2]
         description = ' '.join(args[3:])
         
-        if sheet_manager:
-            result = sheet_manager.add_expense(amount, name, category, description)
-            
-            response = (
-                f"✅ Pengeluaran berhasil dicatat!\n\n"
-                f"👤 {name}\n"
-                f"💰 Rp{amount:,.0f}\n"
-                f"📂 {category}\n"
-                f"📝 {description}\n"
-                f"📅 {result['date']}\n"
-                f"🕐 {result['timestamp']}"
-            )
-            
-            await update.message.reply_text(response)
-        else:
-            await update.message.reply_text("❌ Koneksi ke Google Sheets gagal.")
-            
+        result = sheet_manager.add_transaction(trans_type, amount, category, description)
+        
+        emoji = "💰" if trans_type == "pemasukan" else "💸"
+        response = (
+            f"{emoji} {trans_type.title()} berhasil dicatat!\n\n"
+            f"📂 {category}\n"
+            f"Rp{amount:,.0f}\n"
+            f"📝 {description}\n"
+            f"📅 {result['date']}"
+        )
+        
+        await update.message.reply_text(response)
+        
     except Exception as e:
         logger.error(f"Error in tambah_command: {str(e)}")
-        await update.message.reply_text(f"❌ Terjadi kesalahan: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
-async def lihat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not sheet_manager:
-            await update.message.reply_text("❌ Koneksi ke Google Sheets gagal.")
-            return
+        summary = sheet_manager.get_summary()
         
-        expenses = sheet_manager.get_expenses(limit=10)
-        
-        if not expenses:
-            await update.message.reply_text(
-                "📊 Belum ada pengeluaran yang tercatat.\n\n"
-                "Mulai catat dengan:\n"
-                "/tambah [jumlah] [nama] [kategori] [keterangan]"
-            )
-            return
-        
-        response = "📊 **10 Pengeluaran Terakhir:**\n\n"
-        for i, exp in enumerate(expenses, 1):
-            response += (
-                f"{i}. 👤 {exp['Nama']} - Rp{float(exp['Jumlah']):,.0f}\n"
-                f"   📂 {exp['Kategori']} | 📅 {exp['Tanggal']}\n"
-                f"   📝 {exp['Keterangan']}\n\n"
-            )
-        
-        total = sheet_manager.get_total_expenses()
-        response += f"💰 **Total Pengeluaran:** Rp{total:,.0f}"
+        response = (
+            "📊 **Ringkasan Keuangan:**\n\n"
+            f"💰 Total Pemasukan: Rp{summary['total_masuk']:,.0f}\n"
+            f"💸 Total Pengeluaran: Rp{summary['total_keluar']:,.0f}\n"
+            f"📈 Saldo: Rp{summary['saldo']:,.0f}"
+        )
         
         await update.message.reply_text(response, parse_mode='Markdown')
         
     except Exception as e:
-        logger.error(f"Error in lihat_command: {str(e)}")
-        await update.message.reply_text(f"❌ Terjadi kesalahan: {str(e)}")
+        logger.error(f"Error in summary_command: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
-async def total_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def laporan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not sheet_manager:
-            await update.message.reply_text("❌ Koneksi ke Google Sheets gagal.")
+        args = context.args
+        if len(args) < 2:
+            await update.message.reply_text(
+                "❌ Format:\n/laporan [kategori] [periode]\n\n"
+                "Contoh:\n/laporan Makan minggu ini\n/laporan keuangan bulan ini"
+            )
             return
         
-        total = sheet_manager.get_total_expenses()
+        keyword = args[0]
+        periode = ' '.join(args[1:])
         
-        if total == 0:
-            await update.message.reply_text("📊 Belum ada pengeluaran yang tercatat.")
+        transactions = sheet_manager.get_transactions(limit=1000)
+        
+        if keyword.lower() == 'keuangan':
+            filtered = transactions
+            title = "Keuangan"
         else:
-            await update.message.reply_text(f"💰 **Total Pengeluaran:** Rp{total:,.0f}")
+            filtered = [t for t in transactions if t['Kategori'].lower() == keyword.lower()]
+            title = keyword
+        
+        now = datetime.now()
+        
+        if "hari ini" in periode:
+            date_filter = now.strftime("%Y-%m-%d")
+            filtered = [t for t in filtered if t['Tanggal'] == date_filter]
+            period_text = "Hari Ini"
+        elif "minggu ini" in periode:
+            start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+            filtered = [t for t in filtered if t['Tanggal'] >= start]
+            period_text = "Minggu Ini"
+        elif "bulan ini" in periode:
+            start = now.strftime("%Y-%m-01")
+            filtered = [t for t in filtered if t['Tanggal'] >= start]
+            period_text = "Bulan Ini"
+        else:
+            period_text = periode
+        
+        if not filtered:
+            await update.message.reply_text(f"📊 Tidak ada data untuk '{title}' {period_text}")
+            return
+        
+        total_masuk = sum(float(t['Pemasukan']) for t in filtered)
+        total_keluar = sum(float(t['Pengeluaran']) for t in filtered)
+        saldo = total_masuk - total_keluar
+        
+        response = f"📊 Laporan {title} - {period_text}:\n\n"
+        
+        if keyword.lower() == 'keuangan':
+            response += "💰 **PEMASUKAN:**\n"
+            for t in filtered:
+                if float(t['Pemasukan']) > 0:
+                    response += f"  +Rp{float(t['Pemasukan']):,.0f} - {t['Keterangan']} ({t['Kategori']})\n"
             
+            response += "\n💸 **PENGELUARAN:**\n"
+            for t in filtered:
+                if float(t['Pengeluaran']) > 0:
+                    response += f"  -Rp{float(t['Pengeluaran']):,.0f} - {t['Keterangan']} ({t['Kategori']})\n"
+        else:
+            for t in filtered:
+                if float(t['Pemasukan']) > 0:
+                    response += f"  +Rp{float(t['Pemasukan']):,.0f} - {t['Keterangan']}\n"
+                else:
+                    response += f"  -Rp{float(t['Pengeluaran']):,.0f} - {t['Keterangan']}\n"
+        
+        response += f"\n📈 Total Pemasukan: Rp{total_masuk:,.0f}"
+        response += f"\n📉 Total Pengeluaran: Rp{total_keluar:,.0f}"
+        response += f"\n💰 Saldo: Rp{saldo:,.0f}"
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+        
     except Exception as e:
-        logger.error(f"Error in total_command: {str(e)}")
-        await update.message.reply_text(f"❌ Terjadi kesalahan: {str(e)}")
+        logger.error(f"Error in laporan_command: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
@@ -164,8 +210,8 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("tambah", tambah_command))
-    application.add_handler(CommandHandler("lihat", lihat_command))
-    application.add_handler(CommandHandler("total", total_command))
+    application.add_handler(CommandHandler("summary", summary_command))
+    application.add_handler(CommandHandler("laporan", laporan_command))
     
     logger.info("🚀 Bot is starting...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
